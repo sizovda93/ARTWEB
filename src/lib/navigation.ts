@@ -7,6 +7,7 @@ export const studentNavItems: NavItem[] = [
   { label: "Дашборд", href: "/dashboard" },
   { label: "Мои курсы", href: "/courses" },
   { label: "База знаний", href: "/knowledge-base" },
+  { label: "Вебинары", href: "/webinars" },
 ];
 
 export const adminNavItems: NavItem[] = [
@@ -15,4 +16,5 @@ export const adminNavItems: NavItem[] = [
   { label: "Курсы", href: "/admin/courses" },
   { label: "База знаний", href: "/admin/knowledge-base" },
   { label: "Проверка работ", href: "/admin/submissions" },
+  { label: "Вебинары", href: "/admin/webinars" },
 ];
