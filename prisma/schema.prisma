@@ -6,12 +6,652 @@ generator client {
 
 datasource db {
   provider   = "postgresql"
-  extensions = [uuidOssp(map: "uuid-ossp"), pgTrgm(map: "pg_trgm"), pgVector(map: "vector", schema: "public")]
+  extensions = [pg_trgm, uuid_ossp(map: "uuid-ossp"), vector(schema: "public")]
 }
 
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                          ENUMS                              ║
-// ╚══════════════════════════════════════════════════════════════╝
+/// Пользователь: identity + профиль.
+///
+/// isPartner УДАЛЁН — source of truth: partner_profiles.is_approved.
+/// referred_by_id УДАЛЁН — source of truth: partner_referrals (event=REGISTRATION).
+/// В JWT isPartner вычисляется при логине из partner_profiles.
+model User {
+  id                    String                 @id @default(uuid())
+  email                 String                 @unique
+  passwordHash          String                 @map("password_hash")
+  firstName             String                 @map("first_name")
+  lastName              String                 @map("last_name")
+  phone                 String?
+  role                  UserRole               @default(STUDENT)
+  isActive              Boolean                @default(true) @map("is_active")
+  emailVerified         Boolean                @default(false) @map("email_verified")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  avatarPath            String?                @map("avatar_path")
+  accessGrants          AccessGrant[]
+  aiChatSessions        AiChatSession[]
+  assignmentSubmissions AssignmentSubmission[]
+  autoWebinarViews      AutoWebinarView[]
+  courseProgresses      CourseProgress[]
+  emailTokens           EmailToken[]
+  lessonProgresses      LessonProgress[]
+  notifications         Notification[]
+  partnerProfile        PartnerProfile?
+  referredByEntries     PartnerReferral[]      @relation("ReferredUser")
+  sessions              Session[]
+  telegramLink          TelegramLink?
+  webinarAttendances    WebinarAttendance[]
+  webinarMessages       WebinarChatMessage[]
+
+  @@map("users")
+}
+
+model Session {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  userAgent   String?  @map("user_agent")
+  ipAddress   String?  @map("ip_address")
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  tokenDigest String   @unique @map("token_digest")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model EmailToken {
+  id          String         @id @default(uuid())
+  userId      String         @map("user_id")
+  type        EmailTokenType
+  expiresAt   DateTime       @map("expires_at")
+  usedAt      DateTime?      @map("used_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  tokenDigest String         @unique @map("token_digest")
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("email_tokens")
+}
+
+model TelegramLink {
+  id       String   @id @default(uuid())
+  userId   String   @unique @map("user_id")
+  chatId   String   @unique @map("chat_id")
+  username String?
+  isActive Boolean  @default(true) @map("is_active")
+  linkedAt DateTime @default(now()) @map("linked_at")
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("telegram_links")
+}
+
+model SecurityLog {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  action    String
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("security_logs")
+}
+
+/// Центральная сущность access-first модели.
+///
+/// Гранулярность:
+/// COURSE         → resource_id = courseId (required)
+/// KNOWLEDGE_BASE → resource_id = NULL
+/// AI_CHAT        → resource_id = NULL
+///
+/// tier: заполняется для KNOWLEDGE_BASE (tier-based KB filtering).
+/// Для COURSE и AI_CHAT — NULL.
+model AccessGrant {
+  id              String             @id @default(uuid())
+  userId          String             @map("user_id")
+  resourceType    AccessResourceType @map("resource_type")
+  resourceId      String?            @map("resource_id")
+  grantedVia      AccessGrantSource  @map("granted_via")
+  grantedByUserId String?            @map("granted_by_user_id")
+  tier            AccessTier?
+  expiresAt       DateTime?          @map("expires_at")
+  isActive        Boolean            @default(true) @map("is_active")
+  revokedAt       DateTime?          @map("revoked_at")
+  revokedBy       String?            @map("revoked_by")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, resourceType, resourceId, isActive])
+  @@index([userId, resourceType, isActive])
+  @@index([expiresAt])
+  @@map("access_grants")
+}
+
+/// Курс. Доступ через AccessGrant(COURSE, courseId).
+model Course {
+  id               String           @id @default(uuid())
+  title            String
+  slug             String           @unique
+  description      String?
+  isPublished      Boolean          @default(false) @map("is_published")
+  sortOrder        Int              @default(0) @map("sort_order")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  coverPath        String?          @map("cover_path")
+  aiChatSessions   AiChatSession[]
+  autoWebinars     AutoWebinar[]
+  courseProgresses CourseProgress[]
+  modules          Module[]
+  webinars         Webinar[]
+
+  @@map("courses")
+}
+
+model Module {
+  id        String   @id @default(uuid())
+  courseId  String   @map("course_id")
+  title     String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  lessons   Lesson[]
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+  @@map("modules")
+}
+
+model Lesson {
+  id                 String           @id @default(uuid())
+  moduleId           String           @map("module_id")
+  title              String
+  type               LessonType       @default(MIXED)
+  content            String?
+  videoDuration      Int?             @map("video_duration")
+  isFree             Boolean          @default(false) @map("is_free")
+  sortOrder          Int              @default(0) @map("sort_order")
+  requiresAssignment Boolean          @default(false) @map("requires_assignment")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  videoPath          String?          @map("video_path")
+  assignments        Assignment[]
+  checklists         Checklist[]
+  files              LessonFile[]
+  lessonProgresses   LessonProgress[]
+  module             Module           @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@index([moduleId])
+  @@map("lessons")
+}
+
+model LessonFile {
+  id        String   @id @default(uuid())
+  lessonId  String   @map("lesson_id")
+  fileName  String   @map("file_name")
+  fileSize  Int?     @map("file_size")
+  mimeType  String?  @map("mime_type")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  filePath  String   @map("file_path")
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId])
+  @@map("lesson_files")
+}
+
+model CourseProgress {
+  id                 String    @id @default(uuid())
+  userId             String    @map("user_id")
+  courseId            String    @map("course_id")
+  completedLessons   Int       @default(0) @map("completed_lessons")
+  totalLessons       Int       @default(0) @map("total_lessons")
+  progressPercent    Float     @default(0) @map("progress_percent")
+  completedAt        DateTime? @map("completed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  lastRecalculatedAt DateTime  @default(now()) @map("last_recalculated_at")
+  course             Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@map("course_progresses")
+}
+
+model LessonProgress {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  lessonId    String    @map("lesson_id")
+  isCompleted Boolean   @default(false) @map("is_completed")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  lesson      Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@map("lesson_progresses")
+}
+
+model Assignment {
+  id          String                 @id @default(uuid())
+  lessonId    String                 @map("lesson_id")
+  title       String
+  description String?
+  type        AssignmentType
+  maxScore    Int                    @default(100) @map("max_score")
+  isRequired  Boolean                @default(false) @map("is_required")
+  sortOrder   Int                    @default(0) @map("sort_order")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+  submissions AssignmentSubmission[]
+  lesson      Lesson                 @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  questions   TestQuestion[]
+
+  @@index([lessonId])
+  @@map("assignments")
+}
+
+model TestQuestion {
+  id            String       @id @default(uuid())
+  assignmentId  String       @map("assignment_id")
+  text          String
+  explanation   String?
+  isMultiSelect Boolean      @default(false) @map("is_multi_select")
+  sortOrder     Int          @default(0) @map("sort_order")
+  options       TestOption[]
+  assignment    Assignment   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId])
+  @@map("test_questions")
+}
+
+model TestOption {
+  id         String       @id @default(uuid())
+  text       String
+  isCorrect  Boolean      @default(false) @map("is_correct")
+  sortOrder  Int          @default(0) @map("sort_order")
+  questionId String       @map("question_id")
+  question   TestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@map("test_options")
+}
+
+model AssignmentSubmission {
+  id           String             @id @default(uuid())
+  userId       String             @map("user_id")
+  assignmentId String             @map("assignment_id")
+  status       SubmissionStatus   @default(PENDING)
+  textAnswer   String?            @map("text_answer")
+  aiScore      Int?               @map("ai_score")
+  aiComment    String?            @map("ai_comment")
+  reviewedAt   DateTime?          @map("reviewed_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+  aiConfidence AiConfidenceLevel? @map("ai_confidence")
+  aiCriteria   Json?              @map("ai_criteria")
+  aiReviewedAt DateTime?          @map("ai_reviewed_at")
+  finalComment String?            @map("final_comment")
+  finalScore   Int?               @map("final_score")
+  reviewedBy   String?            @map("reviewed_by")
+  testAnswers  Json?              @map("test_answers")
+  assignment   Assignment         @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  files        SubmissionFile[]
+
+  @@index([userId])
+  @@index([assignmentId])
+  @@index([status])
+  @@map("assignment_submissions")
+}
+
+model SubmissionFile {
+  id           String               @id @default(uuid())
+  submissionId String               @map("submission_id")
+  fileName     String               @map("file_name")
+  filePath     String               @map("file_path")
+  fileSize     Int?                 @map("file_size")
+  mimeType     String?              @map("mime_type")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  submission   AssignmentSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@map("submission_files")
+}
+
+model Checklist {
+  id        String          @id @default(uuid())
+  lessonId  String          @map("lesson_id")
+  title     String
+  sortOrder Int             @default(0) @map("sort_order")
+  items     ChecklistItem[]
+  lesson    Lesson          @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId])
+  @@map("checklists")
+}
+
+model ChecklistItem {
+  id          String    @id @default(uuid())
+  checklistId String    @map("checklist_id")
+  text        String
+  sortOrder   Int       @default(0) @map("sort_order")
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId])
+  @@map("checklist_items")
+}
+
+/// Элемент базы знаний.
+/// Доступ: AccessGrant(KNOWLEDGE_BASE) + tier >= minAccessTier.
+model KnowledgeItem {
+  id             String                    @id @default(uuid())
+  title          String
+  slug           String                    @unique
+  type           KnowledgeItemType
+  description    String?
+  content        String?
+  category       String?
+  tags           String[]
+  isPublished    Boolean                   @default(false) @map("is_published")
+  minAccessTier  AccessTier                @default(BASIC) @map("min_access_tier")
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  updatedAt      DateTime                  @updatedAt @map("updated_at")
+  filePath       String?                   @map("file_path")
+  videoPath      String?                   @map("video_path")
+  viewCount      Int                       @default(0) @map("view_count")
+  attachments    KnowledgeItemAttachment[]
+
+  @@index([category])
+  @@index([type])
+  @@index([isPublished])
+  @@map("knowledge_items")
+}
+
+model KnowledgeItemAttachment {
+  id              String        @id @default(uuid())
+  knowledgeItemId String        @map("knowledge_item_id")
+  fileName        String        @map("file_name")
+  filePath        String        @map("file_path")
+  fileSize        Int?          @map("file_size")
+  mimeType        String?       @map("mime_type")
+  sortOrder       Int           @default(0) @map("sort_order")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  knowledgeItem   KnowledgeItem @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
+
+  @@index([knowledgeItemId])
+  @@map("knowledge_item_attachments")
+}
+
+model Webinar {
+  id            String               @id @default(uuid())
+  title         String
+  slug          String               @unique
+  description   String?
+  status        WebinarStatus        @default(SCHEDULED)
+  scheduledAt   DateTime             @map("scheduled_at")
+  startedAt     DateTime?            @map("started_at")
+  endedAt       DateTime?            @map("ended_at")
+  streamUrl     String?              @map("stream_url")
+  maxAttendees  Int?                 @map("max_attendees")
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+  courseId      String?              @map("course_id")
+  coverPath     String?              @map("cover_path")
+  isPublic      Boolean              @default(false) @map("is_public")
+  recordingPath String?              @map("recording_path")
+  attendances   WebinarAttendance[]
+  chatMessages  WebinarChatMessage[]
+  materials     WebinarMaterial[]
+  course        Course?              @relation(fields: [courseId], references: [id])
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([courseId])
+  @@map("webinars")
+}
+
+model WebinarAttendance {
+  id        String    @id @default(uuid())
+  webinarId String    @map("webinar_id")
+  userId    String    @map("user_id")
+  joinedAt  DateTime  @default(now()) @map("joined_at")
+  leftAt    DateTime? @map("left_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  webinar   Webinar   @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId])
+  @@index([userId])
+  @@map("webinar_attendances")
+}
+
+model WebinarChatMessage {
+  id        String   @id @default(uuid())
+  webinarId String   @map("webinar_id")
+  userId    String   @map("user_id")
+  message   String
+  createdAt DateTime @default(now()) @map("created_at")
+  isDeleted Boolean  @default(false) @map("is_deleted")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  webinar   Webinar  @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId, createdAt])
+  @@map("webinar_chat_messages")
+}
+
+model WebinarMaterial {
+  id        String   @id @default(uuid())
+  webinarId String   @map("webinar_id")
+  title     String
+  filePath  String   @map("file_path")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  webinar   Webinar  @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+
+  @@index([webinarId])
+  @@map("webinar_materials")
+}
+
+model AutoWebinar {
+  id            String                @id @default(uuid())
+  title         String
+  slug          String                @unique
+  description   String?
+  videoDuration Int?                  @map("video_duration")
+  isActive      Boolean               @default(true) @map("is_active")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+  courseId      String?               @map("course_id")
+  coverPath     String?               @map("cover_path")
+  videoPath     String                @map("video_path")
+  materials     AutoWebinarMaterial[]
+  schedules     AutoWebinarSchedule[]
+  views         AutoWebinarView[]
+  course        Course?               @relation(fields: [courseId], references: [id])
+
+  @@index([courseId])
+  @@map("auto_webinars")
+}
+
+model AutoWebinarSchedule {
+  id            String      @id @default(uuid())
+  autoWebinarId String      @map("auto_webinar_id")
+  scheduledAt   DateTime    @map("scheduled_at")
+  isActive      Boolean     @default(true) @map("is_active")
+  autoWebinar   AutoWebinar @relation(fields: [autoWebinarId], references: [id], onDelete: Cascade)
+
+  @@index([autoWebinarId])
+  @@index([scheduledAt, isActive])
+  @@map("auto_webinar_schedules")
+}
+
+model AutoWebinarView {
+  id            String      @id @default(uuid())
+  autoWebinarId String      @map("auto_webinar_id")
+  userId        String      @map("user_id")
+  scheduleId    String?     @map("schedule_id")
+  watchedAt     DateTime    @default(now()) @map("watched_at")
+  watchDuration Int?        @map("watch_duration")
+  autoWebinar   AutoWebinar @relation(fields: [autoWebinarId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([autoWebinarId])
+  @@index([userId])
+  @@map("auto_webinar_views")
+}
+
+model AutoWebinarMaterial {
+  id            String      @id @default(uuid())
+  autoWebinarId String      @map("auto_webinar_id")
+  title         String
+  sortOrder     Int         @default(0) @map("sort_order")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  filePath      String      @map("file_path")
+  autoWebinar   AutoWebinar @relation(fields: [autoWebinarId], references: [id], onDelete: Cascade)
+
+  @@index([autoWebinarId])
+  @@map("auto_webinar_materials")
+}
+
+model AiChatSession {
+  id        String          @id @default(uuid())
+  userId    String          @map("user_id")
+  courseId  String?         @map("course_id")
+  title     String?
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  messages  AiChatMessage[]
+  course    Course?         @relation(fields: [courseId], references: [id])
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("ai_chat_sessions")
+}
+
+model AiChatMessage {
+  id         String             @id @default(uuid())
+  sessionId  String             @map("session_id")
+  role       AiMessageRole
+  content    String
+  tokens     Int?
+  createdAt  DateTime           @default(now()) @map("created_at")
+  confidence AiConfidenceLevel?
+  sources    Json?
+  session    AiChatSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("ai_chat_messages")
+}
+
+/// AI-лимиты per user.
+/// Source of truth для rate limiting (не для доступа — доступ = AccessGrant).
+/// При выдаче AI_CHAT grant лимиты устанавливаются/сбрасываются.
+model AiUsageLimit {
+  id               String   @id @default(uuid())
+  userId           String   @unique @map("user_id")
+  dailyRequests    Int      @default(0) @map("daily_requests")
+  monthlyRequests  Int      @default(0) @map("monthly_requests")
+  lastResetDaily   DateTime @default(now()) @map("last_reset_daily")
+  lastResetMonthly DateTime @default(now()) @map("last_reset_monthly")
+  dailyLimit       Int      @default(10) @map("daily_limit")
+  monthlyLimit     Int      @default(100) @map("monthly_limit")
+
+  @@map("ai_usage_limits")
+}
+
+model AiEmbedding {
+  id         String                @id @default(uuid())
+  sourceType AiEmbeddingSourceType @map("source_type")
+  sourceId   String                @map("source_id")
+  chunkIndex Int                   @map("chunk_index")
+  content    String
+  title      String?
+  createdAt  DateTime              @default(now()) @map("created_at")
+
+  @@index([sourceType, sourceId])
+  @@map("ai_embeddings")
+}
+
+model Notification {
+  id                String              @id @default(uuid())
+  userId            String              @map("user_id")
+  type              NotificationType
+  channel           NotificationChannel
+  title             String
+  body              String
+  metadata          Json?
+  sentAt            DateTime?           @map("sent_at")
+  readAt            DateTime?           @map("read_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  errorMessage      String?             @map("error_message")
+  eventKey          String?             @map("event_key")
+  failedAt          DateTime?           @map("failed_at")
+  providerMessageId String?             @map("provider_message_id")
+  status            NotificationStatus  @default(PENDING)
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, channel, status])
+  @@index([eventKey])
+  @@index([type])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// Партнёрский профиль.
+/// totalEarnings / pendingPayout — deprecated (payment domain удалён).
+model PartnerProfile {
+  id             String            @id @default(uuid())
+  userId         String            @unique @map("user_id")
+  referralCode   String            @unique @map("referral_code")
+  commissionRate Decimal           @default(10) @map("commission_rate") @db.Decimal(5, 2)
+  totalEarnings  Decimal           @default(0) @map("total_earnings") @db.Decimal(12, 2)
+  pendingPayout  Decimal           @default(0) @map("pending_payout") @db.Decimal(12, 2)
+  isApproved     Boolean           @default(false) @map("is_approved")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referrals      PartnerReferral[]
+
+  @@map("partner_profiles")
+}
+
+model PartnerReferral {
+  id               String           @id @default(uuid())
+  partnerProfileId String           @map("partner_profile_id")
+  referredUserId   String           @map("referred_user_id")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  event            PartnerEventType
+  partnerProfile   PartnerProfile   @relation(fields: [partnerProfileId], references: [id], onDelete: Cascade)
+  referredUser     User             @relation("ReferredUser", fields: [referredUserId], references: [id])
+
+  @@index([partnerProfileId])
+  @@index([referredUserId])
+  @@map("partner_referrals")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorId      String   @map("actor_id")
+  actorRole    UserRole @map("actor_role")
+  action       String
+  targetType   String   @map("target_type")
+  targetId     String?  @map("target_id")
+  details      Json?
+  previousData Json?    @map("previous_data")
+  newData      Json?    @map("new_data")
+  ipAddress    String?  @map("ip_address")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([targetType, targetId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
 
 enum UserRole {
   ADMIN
@@ -23,39 +663,10 @@ enum EmailTokenType {
   PASSWORD_RESET
 }
 
-enum TariffTier {
+enum AccessTier {
   BASIC
   STANDARD
   PARTNER
-}
-
-enum TariffFeatureType {
-  KNOWLEDGE_BASE_ACCESS
-  AI_CHAT_ACCESS
-}
-
-enum PromoCodeType {
-  PERCENT
-  FIXED
-  FULL_ACCESS
-}
-
-enum PurchaseStatus {
-  PENDING
-  CONFIRMED
-  CANCELLED
-  REFUNDED
-}
-
-enum PurchaseItemType {
-  COURSE
-  TARIFF
-}
-
-enum PaymentMethod {
-  MANUAL
-  CARD
-  INVOICE
 }
 
 enum AccessResourceType {
@@ -65,9 +676,8 @@ enum AccessResourceType {
 }
 
 enum AccessGrantSource {
-  PURCHASE
   ADMIN_GRANT
-  PROMO_CODE
+  SYSTEM
 }
 
 enum LessonType {
@@ -124,7 +734,6 @@ enum NotificationType {
   REGISTRATION
   EMAIL_VERIFICATION
   PASSWORD_RESET
-  PURCHASE_CONFIRMED
   ACCESS_GRANTED
   ACCESS_REVOKED
   WEBINAR_REMINDER
@@ -152,1017 +761,4 @@ enum NotificationStatus {
 enum PartnerEventType {
   REGISTRATION
   PURCHASE
-}
-
-enum CommissionStatus {
-  PENDING
-  APPROVED
-  PAID
-  CANCELLED
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                  1. AUTH & USERS  (5 таблиц)                ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Пользователь: identity + профиль.
-///
-/// isPartner УДАЛЁН — source of truth: partner_profiles.is_approved.
-/// referred_by_id УДАЛЁН — source of truth: partner_referrals (event=REGISTRATION).
-/// В JWT isPartner вычисляется при логине из partner_profiles.
-model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  passwordHash  String   @map("password_hash")
-  firstName     String   @map("first_name")
-  lastName      String   @map("last_name")
-  phone         String?
-  avatarPath    String?  @map("avatar_path")
-  role          UserRole @default(STUDENT)
-  isActive      Boolean  @default(true) @map("is_active")
-  emailVerified Boolean  @default(false) @map("email_verified")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  sessions               Session[]
-  emailTokens            EmailToken[]
-  accessGrants           AccessGrant[]
-  purchases              Purchase[]
-  courseProgresses        CourseProgress[]
-  lessonProgresses       LessonProgress[]
-  assignmentSubmissions  AssignmentSubmission[]
-  webinarAttendances     WebinarAttendance[]
-  webinarMessages        WebinarChatMessage[]
-  autoWebinarViews       AutoWebinarView[]
-  aiChatSessions         AiChatSession[]
-  notifications          Notification[]
-  telegramLink           TelegramLink?
-  promoCodeUsages        PromoCodeUsage[]
-  partnerProfile         PartnerProfile?
-  referredByEntries      PartnerReferral[] @relation("ReferredUser")
-
-  @@map("users")
-}
-
-/// Сессия (refresh token).
-/// tokenDigest = SHA-256 от реального токена. Raw-значение в БД НЕ хранится.
-/// Lookup: hash(incoming_token) → find by digest.
-model Session {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
-  tokenDigest String   @unique @map("token_digest")
-  userAgent   String?  @map("user_agent")
-  ipAddress   String?  @map("ip_address")
-  expiresAt   DateTime @map("expires_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([expiresAt])
-  @@map("sessions")
-}
-
-/// Токен подтверждения email / сброса пароля.
-/// tokenDigest = SHA-256 от реального токена. В БД хранится только digest.
-model EmailToken {
-  id          String         @id @default(uuid())
-  userId      String         @map("user_id")
-  tokenDigest String         @unique @map("token_digest")
-  type        EmailTokenType
-  expiresAt   DateTime       @map("expires_at")
-  usedAt      DateTime?      @map("used_at")
-  createdAt   DateTime       @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([expiresAt])
-  @@map("email_tokens")
-}
-
-/// Привязка Telegram для уведомлений. 1 user : 1 telegram.
-model TelegramLink {
-  id       String   @id @default(uuid())
-  userId   String   @unique @map("user_id")
-  chatId   String   @unique @map("chat_id")
-  username String?
-  isActive Boolean  @default(true) @map("is_active")
-  linkedAt DateTime @default(now()) @map("linked_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("telegram_links")
-}
-
-/// Лог безопасности. Append-only.
-model SecurityLog {
-  id        String   @id @default(uuid())
-  userId    String?  @map("user_id")
-  action    String
-  ipAddress String?  @map("ip_address")
-  userAgent String?  @map("user_agent")
-  metadata  Json?
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-  @@map("security_logs")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║              2. TARIFFS & ENTITLEMENTS  (3 таблицы)          ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Тариф: набор курсов + глобальные фичи (KB, AI).
-model Tariff {
-  id          String     @id @default(uuid())
-  name        String
-  slug        String     @unique
-  tier        TariffTier
-  description String?
-  price       Decimal    @db.Decimal(10, 2)
-  oldPrice    Decimal?   @db.Decimal(10, 2) @map("old_price")
-  currency    String     @default("RUB")
-  isActive    Boolean    @default(true) @map("is_active")
-  sortOrder   Int        @default(0) @map("sort_order")
-  createdAt   DateTime   @default(now()) @map("created_at")
-  updatedAt   DateTime   @updatedAt @map("updated_at")
-
-  tariffCourses  TariffCourse[]
-  tariffFeatures TariffFeature[]
-  purchaseItems  PurchaseItem[]
-  accessGrants   AccessGrant[]
-  promoCodes     PromoCode[]
-
-  @@map("tariffs")
-}
-
-/// Связь тариф ↔ курс.
-model TariffCourse {
-  id       String @id @default(uuid())
-  tariffId String @map("tariff_id")
-  courseId  String @map("course_id")
-
-  tariff Tariff @relation(fields: [tariffId], references: [id], onDelete: Cascade)
-  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
-
-  @@unique([tariffId, courseId])
-  @@map("tariff_courses")
-}
-
-/// Глобальные фичи тарифа.
-/// config JSON: AI → {"dailyLimit":30,"monthlyLimit":500}; KB → {} (флаг).
-model TariffFeature {
-  id       String            @id @default(uuid())
-  tariffId String            @map("tariff_id")
-  feature  TariffFeatureType
-  config   Json?
-
-  tariff Tariff @relation(fields: [tariffId], references: [id], onDelete: Cascade)
-
-  @@unique([tariffId, feature])
-  @@map("tariff_features")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                 3. PROMO CODES  (2 таблицы)                 ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Промокод. FK на tariff/course — ссылочная целостность на уровне БД.
-/// Оба NULL → промокод универсальный.
-/// onDelete: Restrict — нельзя hard-delete курс/тариф, пока есть привязанные промокоды.
-/// Политика: курсы/тарифы архивируются (isPublished/isActive=false), не удаляются.
-/// App-layer при применении проверяет, что target активен/опубликован.
-model PromoCode {
-  id            String        @id @default(uuid())
-  code          String        @unique
-  type          PromoCodeType
-  value         Decimal       @db.Decimal(10, 2)
-  maxUsages     Int?          @map("max_usages")
-  currentUsages Int           @default(0) @map("current_usages")
-  validFrom     DateTime?     @map("valid_from")
-  validUntil    DateTime?     @map("valid_until")
-  isActive      Boolean       @default(true) @map("is_active")
-  tariffId      String?       @map("tariff_id")
-  courseId       String?      @map("course_id")
-  createdAt     DateTime      @default(now()) @map("created_at")
-
-  targetTariff Tariff? @relation(fields: [tariffId], references: [id], onDelete: Restrict)
-  targetCourse Course? @relation(fields: [courseId], references: [id], onDelete: Restrict)
-  usages       PromoCodeUsage[]
-
-  @@map("promo_codes")
-}
-
-/// Использование промокода.
-model PromoCodeUsage {
-  id          String   @id @default(uuid())
-  promoCodeId String   @map("promo_code_id")
-  userId      String   @map("user_id")
-  purchaseId  String?  @map("purchase_id")
-  usedAt      DateTime @default(now()) @map("used_at")
-
-  promoCode PromoCode @relation(fields: [promoCodeId], references: [id])
-  user      User      @relation(fields: [userId], references: [id])
-  purchase  Purchase? @relation(fields: [purchaseId], references: [id])
-
-  @@unique([promoCodeId, userId])
-  @@map("promo_code_usages")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║              4. PURCHASES & BILLING  (3 таблицы)            ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Покупка. MVP: админ подтверждает вручную.
-model Purchase {
-  id             String         @id @default(uuid())
-  userId         String         @map("user_id")
-  status         PurchaseStatus @default(PENDING)
-  totalAmount    Decimal        @db.Decimal(10, 2) @map("total_amount")
-  discountAmount Decimal        @default(0) @db.Decimal(10, 2) @map("discount_amount")
-  finalAmount    Decimal        @db.Decimal(10, 2) @map("final_amount")
-  currency       String         @default("RUB")
-  paymentMethod  PaymentMethod  @default(MANUAL) @map("payment_method")
-  promoCodeId    String?        @map("promo_code_id")
-  confirmedAt    DateTime?      @map("confirmed_at")
-  confirmedBy    String?        @map("confirmed_by")
-  cancelledAt    DateTime?      @map("cancelled_at")
-  cancelledBy    String?        @map("cancelled_by")
-  cancelReason   String?        @map("cancel_reason")
-  note           String?
-  createdAt      DateTime       @default(now()) @map("created_at")
-  updatedAt      DateTime       @updatedAt @map("updated_at")
-
-  user            User              @relation(fields: [userId], references: [id])
-  items           PurchaseItem[]
-  accessGrants    AccessGrant[]
-  billingRecords  BillingRecord[]
-  promoCodeUsages PromoCodeUsage[]
-  commissions     PartnerCommission[]
-
-  @@index([userId])
-  @@index([status])
-  @@index([createdAt])
-  @@map("purchases")
-}
-
-/// Позиция покупки. title/price — snapshot на момент покупки.
-model PurchaseItem {
-  id         String           @id @default(uuid())
-  purchaseId String           @map("purchase_id")
-  itemType   PurchaseItemType @map("item_type")
-  courseId    String?          @map("course_id")
-  tariffId   String?          @map("tariff_id")
-  price      Decimal          @db.Decimal(10, 2)
-  title      String
-
-  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  course   Course?  @relation(fields: [courseId], references: [id])
-  tariff   Tariff?  @relation(fields: [tariffId], references: [id])
-
-  @@index([purchaseId])
-  @@map("purchase_items")
-}
-
-/// Финансовая запись. Создаётся при подтверждении покупки.
-model BillingRecord {
-  id            String   @id @default(uuid())
-  purchaseId    String   @map("purchase_id")
-  amount        Decimal  @db.Decimal(10, 2)
-  currency      String   @default("RUB")
-  description   String
-  invoiceNumber String?  @map("invoice_number")
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  purchase Purchase @relation(fields: [purchaseId], references: [id])
-
-  @@index([purchaseId])
-  @@index([createdAt])
-  @@map("billing_records")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                5. ACCESS GRANTS  (1 таблица)                ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Центральная сущность access-first модели.
-///
-/// Гранулярность:
-///   COURSE         → resource_id = courseId (required)
-///   KNOWLEDGE_BASE → resource_id = NULL
-///   AI_CHAT        → resource_id = NULL
-///
-/// tier: заполняется для KNOWLEDGE_BASE (tier-based KB filtering).
-///       Для COURSE и AI_CHAT — NULL.
-///
-/// Защита от дублей — два partial unique index (raw SQL migration):
-///   1. (user_id, resource_type, resource_id) WHERE is_active AND resource_id IS NOT NULL — COURSE
-///   2. (user_id, resource_type)              WHERE is_active AND resource_id IS NULL     — KB, AI_CHAT
-/// CHECK constraint: COURSE requires resource_id NOT NULL (raw SQL migration).
-model AccessGrant {
-  id              String             @id @default(uuid())
-  userId          String             @map("user_id")
-  resourceType    AccessResourceType @map("resource_type")
-  resourceId      String?            @map("resource_id")
-  grantedVia      AccessGrantSource  @map("granted_via")
-  purchaseId      String?            @map("purchase_id")
-  grantedByUserId String?            @map("granted_by_user_id")
-  tariffId        String?            @map("tariff_id")
-  tier            TariffTier?
-  expiresAt       DateTime?          @map("expires_at")
-  isActive        Boolean            @default(true) @map("is_active")
-  revokedAt       DateTime?          @map("revoked_at")
-  revokedBy       String?            @map("revoked_by")
-  createdAt       DateTime           @default(now()) @map("created_at")
-
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  purchase Purchase? @relation(fields: [purchaseId], references: [id])
-  tariff   Tariff?   @relation(fields: [tariffId], references: [id])
-
-  @@index([userId, resourceType, resourceId, isActive])
-  @@index([userId, resourceType, isActive])
-  @@index([purchaseId])
-  @@index([expiresAt])
-  @@map("access_grants")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                   6. COURSES  (4 таблицы)                   ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Курс. Доступ через AccessGrant(COURSE, courseId).
-///
-/// Прямая покупка:
-///   price != NULL и isDirectPurchaseAvailable = true → можно купить без тарифа.
-///   oldPrice — зачёркнутая цена для UI ("было 5000, стало 3000").
-model Course {
-  id                         String   @id @default(uuid())
-  title                      String
-  slug                       String   @unique
-  description                String?
-  coverPath                  String?  @map("cover_path")
-  price                      Decimal? @db.Decimal(10, 2)
-  oldPrice                   Decimal? @db.Decimal(10, 2) @map("old_price")
-  currency                   String   @default("RUB")
-  isPublished                Boolean  @default(false) @map("is_published")
-  isDirectPurchaseAvailable  Boolean  @default(false) @map("is_direct_purchase_available")
-  sortOrder                  Int      @default(0) @map("sort_order")
-  createdAt                  DateTime @default(now()) @map("created_at")
-  updatedAt                  DateTime @updatedAt @map("updated_at")
-
-  modules          Module[]
-  tariffCourses    TariffCourse[]
-  purchaseItems    PurchaseItem[]
-  courseProgresses CourseProgress[]
-  webinars         Webinar[]
-  autoWebinars     AutoWebinar[]
-  promoCodes       PromoCode[]
-  aiChatSessions   AiChatSession[]
-
-  @@map("courses")
-}
-
-/// Модуль курса.
-model Module {
-  id        String   @id @default(uuid())
-  courseId   String   @map("course_id")
-  title     String
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  lessons Lesson[]
-
-  @@index([courseId])
-  @@map("modules")
-}
-
-/// Урок. Доступ = AccessGrant на курс. isFree=true → без AccessGrant.
-model Lesson {
-  id                 String     @id @default(uuid())
-  moduleId           String     @map("module_id")
-  title              String
-  type               LessonType @default(MIXED)
-  content            String?
-  videoPath          String?    @map("video_path")
-  videoDuration      Int?       @map("video_duration")
-  isFree             Boolean    @default(false) @map("is_free")
-  sortOrder          Int        @default(0) @map("sort_order")
-  requiresAssignment Boolean    @default(false) @map("requires_assignment")
-  createdAt          DateTime   @default(now()) @map("created_at")
-  updatedAt          DateTime   @updatedAt @map("updated_at")
-
-  module           Module             @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  files            LessonFile[]
-  assignments      Assignment[]
-  checklists       Checklist[]
-  lessonProgresses LessonProgress[]
-
-  @@index([moduleId])
-  @@map("lessons")
-}
-
-/// Файл урока.
-model LessonFile {
-  id        String   @id @default(uuid())
-  lessonId  String   @map("lesson_id")
-  fileName  String   @map("file_name")
-  filePath  String   @map("file_path")
-  fileSize  Int?     @map("file_size")
-  mimeType  String?  @map("mime_type")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-
-  @@index([lessonId])
-  @@map("lesson_files")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                   7. PROGRESS  (2 таблицы)                  ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// CACHE / AGGREGATE — пересчитывается из lesson_progresses.
-/// НЕ source of truth. Source of truth = lesson_progresses.
-/// Пересчёт: при каждом complete/uncomplete урока через service.
-model CourseProgress {
-  id                 String    @id @default(uuid())
-  userId             String    @map("user_id")
-  courseId            String    @map("course_id")
-  completedLessons   Int       @default(0) @map("completed_lessons")
-  totalLessons       Int       @default(0) @map("total_lessons")
-  progressPercent    Float     @default(0) @map("progress_percent")
-  completedAt        DateTime? @map("completed_at")
-  lastRecalculatedAt DateTime  @default(now()) @map("last_recalculated_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, courseId])
-  @@map("course_progresses")
-}
-
-/// SOURCE OF TRUTH для прогресса обучения.
-model LessonProgress {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  lessonId    String    @map("lesson_id")
-  isCompleted Boolean   @default(false) @map("is_completed")
-  completedAt DateTime? @map("completed_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, lessonId])
-  @@map("lesson_progresses")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║             8. ASSIGNMENTS & TESTS  (5 таблиц)              ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Задание к уроку.
-model Assignment {
-  id          String         @id @default(uuid())
-  lessonId    String         @map("lesson_id")
-  title       String
-  description String?
-  type        AssignmentType
-  maxScore    Int            @default(100) @map("max_score")
-  isRequired  Boolean        @default(false) @map("is_required")
-  sortOrder   Int            @default(0) @map("sort_order")
-  createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime       @updatedAt @map("updated_at")
-
-  lesson      Lesson                @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  questions   TestQuestion[]
-  submissions AssignmentSubmission[]
-
-  @@index([lessonId])
-  @@map("assignments")
-}
-
-/// Вопрос теста. Assignment(type=TEST) → N вопросов.
-model TestQuestion {
-  id            String  @id @default(uuid())
-  assignmentId  String  @map("assignment_id")
-  text          String
-  explanation   String?
-  isMultiSelect Boolean @default(false) @map("is_multi_select")
-  sortOrder     Int     @default(0) @map("sort_order")
-
-  assignment Assignment   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  options    TestOption[]
-
-  @@index([assignmentId])
-  @@map("test_questions")
-}
-
-/// Вариант ответа.
-model TestOption {
-  id         String  @id @default(uuid())
-  questionId String  @map("question_id")
-  text       String
-  isCorrect  Boolean @default(false) @map("is_correct")
-  sortOrder  Int     @default(0) @map("sort_order")
-
-  question TestQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
-
-  @@index([questionId])
-  @@map("test_options")
-}
-
-/// Ответ студента.
-///
-/// AI-проверка и финальная проверка РАЗДЕЛЕНЫ:
-///   ai_*    → автоматическая предпроверка (ИИ)
-///   final_* → ручная проверка (админ)
-/// Эти два набора полей НЕ смешиваются.
-/// Для тестов: final_score вычисляется автоматически, reviewed_by = NULL.
-model AssignmentSubmission {
-  id           String           @id @default(uuid())
-  userId       String           @map("user_id")
-  assignmentId String           @map("assignment_id")
-  status       SubmissionStatus @default(PENDING)
-
-  // Ответ студента
-  textAnswer  String? @map("text_answer")
-  testAnswers Json?   @map("test_answers") // [{questionId, selectedOptionIds:[]}]
-
-  // AI pre-review
-  aiScore      Int?              @map("ai_score")
-  aiComment    String?           @map("ai_comment")
-  aiCriteria   Json?             @map("ai_criteria") // [{criterion, score, maxScore, comment}]
-  aiConfidence AiConfidenceLevel? @map("ai_confidence")
-  aiReviewedAt DateTime?         @map("ai_reviewed_at")
-
-  // Final review (admin or auto for tests)
-  finalScore   Int?      @map("final_score")
-  finalComment String?   @map("final_comment")
-  reviewedBy   String?   @map("reviewed_by")
-  reviewedAt   DateTime? @map("reviewed_at")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  assignment Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  files      SubmissionFile[]
-
-  @@index([userId])
-  @@index([assignmentId])
-  @@index([status])
-  @@map("assignment_submissions")
-}
-
-/// Файл студента к заданию.
-model SubmissionFile {
-  id           String   @id @default(uuid())
-  submissionId String   @map("submission_id")
-  fileName     String   @map("file_name")
-  filePath     String   @map("file_path")
-  fileSize     Int?     @map("file_size")
-  mimeType     String?  @map("mime_type")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  submission AssignmentSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-
-  @@index([submissionId])
-  @@map("submission_files")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                  9. CHECKLISTS  (2 таблицы)                 ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-model Checklist {
-  id        String @id @default(uuid())
-  lessonId  String @map("lesson_id")
-  title     String
-  sortOrder Int    @default(0) @map("sort_order")
-
-  lesson Lesson          @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  items  ChecklistItem[]
-
-  @@index([lessonId])
-  @@map("checklists")
-}
-
-model ChecklistItem {
-  id          String @id @default(uuid())
-  checklistId String @map("checklist_id")
-  text        String
-  sortOrder   Int    @default(0) @map("sort_order")
-
-  checklist Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
-
-  @@index([checklistId])
-  @@map("checklist_items")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║              10. KNOWLEDGE BASE  (2 таблицы)                ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Элемент базы знаний.
-/// Доступ: AccessGrant(KNOWLEDGE_BASE) + tier >= minTariffTier.
-/// filePath / videoPath — основной файл / видео.
-/// Доп. файлы — knowledge_item_attachments.
-model KnowledgeItem {
-  id            String            @id @default(uuid())
-  title         String
-  slug          String            @unique
-  type          KnowledgeItemType
-  description   String?
-  content       String?
-  filePath      String?           @map("file_path")
-  videoPath     String?           @map("video_path")
-  category      String?
-  tags          String[]
-  isPublished   Boolean           @default(false) @map("is_published")
-  minTariffTier TariffTier        @default(BASIC) @map("min_tariff_tier")
-  viewCount     Int               @default(0) @map("view_count")
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
-
-  attachments KnowledgeItemAttachment[]
-
-  @@index([category])
-  @@index([type])
-  @@index([isPublished])
-  @@map("knowledge_items")
-}
-
-/// Дополнительный файл к элементу базы знаний.
-/// Обоснование: юридический контент часто требует нескольких связанных файлов
-/// (шаблон + заполненный пример + инструкция).
-model KnowledgeItemAttachment {
-  id              String   @id @default(uuid())
-  knowledgeItemId String   @map("knowledge_item_id")
-  fileName        String   @map("file_name")
-  filePath        String   @map("file_path")
-  fileSize        Int?     @map("file_size")
-  mimeType        String?  @map("mime_type")
-  sortOrder       Int      @default(0) @map("sort_order")
-  createdAt       DateTime @default(now()) @map("created_at")
-
-  knowledgeItem KnowledgeItem @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
-
-  @@index([knowledgeItemId])
-  @@map("knowledge_item_attachments")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                  11. WEBINARS  (4 таблицы)                  ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Живой вебинар. Доступ: courseId (→ AccessGrant на курс) или isPublic.
-model Webinar {
-  id            String        @id @default(uuid())
-  title         String
-  slug          String        @unique
-  description   String?
-  coverPath     String?       @map("cover_path")
-  courseId       String?       @map("course_id")
-  status        WebinarStatus @default(SCHEDULED)
-  scheduledAt   DateTime      @map("scheduled_at")
-  startedAt     DateTime?     @map("started_at")
-  endedAt       DateTime?     @map("ended_at")
-  streamUrl     String?       @map("stream_url")
-  recordingPath String?       @map("recording_path")
-  maxAttendees  Int?          @map("max_attendees")
-  isPublic      Boolean       @default(false) @map("is_public")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
-
-  course       Course?              @relation(fields: [courseId], references: [id])
-  attendances  WebinarAttendance[]
-  chatMessages WebinarChatMessage[]
-  materials    WebinarMaterial[]
-
-  @@index([status])
-  @@index([scheduledAt])
-  @@index([courseId])
-  @@map("webinars")
-}
-
-model WebinarAttendance {
-  id        String    @id @default(uuid())
-  webinarId String    @map("webinar_id")
-  userId    String    @map("user_id")
-  joinedAt  DateTime  @default(now()) @map("joined_at")
-  leftAt    DateTime? @map("left_at")
-
-  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([webinarId])
-  @@index([userId])
-  @@map("webinar_attendances")
-}
-
-model WebinarChatMessage {
-  id        String   @id @default(uuid())
-  webinarId String   @map("webinar_id")
-  userId    String   @map("user_id")
-  message   String
-  isDeleted Boolean  @default(false) @map("is_deleted")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([webinarId, createdAt])
-  @@map("webinar_chat_messages")
-}
-
-model WebinarMaterial {
-  id        String   @id @default(uuid())
-  webinarId String   @map("webinar_id")
-  title     String
-  filePath  String   @map("file_path")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  webinar Webinar @relation(fields: [webinarId], references: [id], onDelete: Cascade)
-
-  @@index([webinarId])
-  @@map("webinar_materials")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                12. AUTO-WEBINARS  (4 таблицы)               ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-model AutoWebinar {
-  id            String   @id @default(uuid())
-  title         String
-  slug          String   @unique
-  description   String?
-  coverPath     String?  @map("cover_path")
-  courseId       String?  @map("course_id")
-  videoPath     String   @map("video_path")
-  videoDuration Int?     @map("video_duration")
-  isActive      Boolean  @default(true) @map("is_active")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  course    Course?                @relation(fields: [courseId], references: [id])
-  schedules AutoWebinarSchedule[]
-  views     AutoWebinarView[]
-  materials AutoWebinarMaterial[]
-
-  @@index([courseId])
-  @@map("auto_webinars")
-}
-
-model AutoWebinarSchedule {
-  id            String   @id @default(uuid())
-  autoWebinarId String   @map("auto_webinar_id")
-  scheduledAt   DateTime @map("scheduled_at")
-  isActive      Boolean  @default(true) @map("is_active")
-
-  autoWebinar AutoWebinar @relation(fields: [autoWebinarId], references: [id], onDelete: Cascade)
-
-  @@index([autoWebinarId])
-  @@index([scheduledAt, isActive])
-  @@map("auto_webinar_schedules")
-}
-
-model AutoWebinarView {
-  id            String   @id @default(uuid())
-  autoWebinarId String   @map("auto_webinar_id")
-  userId        String   @map("user_id")
-  scheduleId    String?  @map("schedule_id")
-  watchedAt     DateTime @default(now()) @map("watched_at")
-  watchDuration Int?     @map("watch_duration")
-
-  autoWebinar AutoWebinar @relation(fields: [autoWebinarId], references: [id], onDelete: Cascade)
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([autoWebinarId])
-  @@index([userId])
-  @@map("auto_webinar_views")
-}
-
-model AutoWebinarMaterial {
-  id            String   @id @default(uuid())
-  autoWebinarId String   @map("auto_webinar_id")
-  title         String
-  filePath      String   @map("file_path")
-  sortOrder     Int      @default(0) @map("sort_order")
-  createdAt     DateTime @default(now()) @map("created_at")
-
-  autoWebinar AutoWebinar @relation(fields: [autoWebinarId], references: [id], onDelete: Cascade)
-
-  @@index([autoWebinarId])
-  @@map("auto_webinar_materials")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                     13. AI  (4 таблицы)                     ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Сессия AI-чата. courseId = контекст для RAG-retrieval.
-/// MVP: courseId достаточно — AI отвечает в рамках материалов курса.
-/// NULL courseId = общий чат без привязки к курсу.
-/// Lesson-level контекст — post-MVP (добавить lessonId опционально).
-model AiChatSession {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  courseId   String?  @map("course_id")
-  title     String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  course   Course?         @relation(fields: [courseId], references: [id])
-  messages AiChatMessage[]
-
-  @@index([userId])
-  @@map("ai_chat_sessions")
-}
-
-/// AI-сообщение. sources + confidence — только для role=ASSISTANT.
-model AiChatMessage {
-  id         String             @id @default(uuid())
-  sessionId  String             @map("session_id")
-  role       AiMessageRole
-  content    String
-  sources    Json?
-  confidence AiConfidenceLevel?
-  tokens     Int?
-  createdAt  DateTime           @default(now()) @map("created_at")
-
-  session AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@index([sessionId])
-  @@map("ai_chat_messages")
-}
-
-/// AI-лимиты. dailyLimit/monthlyLimit из TariffFeature.config.
-model AiUsageLimit {
-  id               String   @id @default(uuid())
-  userId           String   @unique @map("user_id")
-  dailyRequests    Int      @default(0) @map("daily_requests")
-  monthlyRequests  Int      @default(0) @map("monthly_requests")
-  dailyLimit       Int      @default(10) @map("daily_limit")
-  monthlyLimit     Int      @default(100) @map("monthly_limit")
-  lastResetDaily   DateTime @default(now()) @map("last_reset_daily")
-  lastResetMonthly DateTime @default(now()) @map("last_reset_monthly")
-
-  @@map("ai_usage_limits")
-}
-
-/// RAG-chunk. Vector column добавляется raw SQL.
-model AiEmbedding {
-  id         String                @id @default(uuid())
-  sourceType AiEmbeddingSourceType @map("source_type")
-  sourceId   String                @map("source_id")
-  chunkIndex Int                   @map("chunk_index")
-  content    String
-  title      String?
-  createdAt  DateTime              @default(now()) @map("created_at")
-
-  @@index([sourceType, sourceId])
-  @@map("ai_embeddings")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                14. NOTIFICATIONS  (1 таблица)               ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Уведомление. Одна строка = один канал.
-/// eventKey группирует строки одного события (IN_APP + EMAIL + TG).
-///
-/// Lifecycle по каналам:
-///   IN_APP:   PENDING → SENT (отображено в UI) → READ (user открыл). readAt заполняется.
-///   EMAIL:    PENDING → SENT (SMTP accepted) | FAILED. readAt ВСЕГДА NULL (email opens ≠ reliable).
-///   TELEGRAM: PENDING → SENT (API accepted) | FAILED. readAt NULL для MVP.
-/// sentAt — момент успешной доставки провайдеру.
-/// failedAt + errorMessage — при ошибке. Retry: status → PENDING, failedAt сохраняется.
-model Notification {
-  id                String             @id @default(uuid())
-  userId            String             @map("user_id")
-  type              NotificationType
-  channel           NotificationChannel
-  status            NotificationStatus @default(PENDING)
-  eventKey          String?            @map("event_key")
-  title             String
-  body              String
-  metadata          Json?
-  providerMessageId String?            @map("provider_message_id")
-  sentAt            DateTime?          @map("sent_at")
-  readAt            DateTime?          @map("read_at")
-  failedAt          DateTime?          @map("failed_at")
-  errorMessage      String?            @map("error_message")
-  createdAt         DateTime           @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, channel, status])
-  @@index([eventKey])
-  @@index([type])
-  @@index([createdAt])
-  @@map("notifications")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║               15. PARTNER SYSTEM  (3 таблицы)               ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Партнёрский профиль.
-/// SOURCE OF TRUTH для партнёрского статуса: is_approved.
-/// User.isPartner УДАЛЁН — вычисляется из этой таблицы.
-model PartnerProfile {
-  id             String   @id @default(uuid())
-  userId         String   @unique @map("user_id")
-  referralCode   String   @unique @map("referral_code")
-  commissionRate Decimal  @default(10) @db.Decimal(5, 2) @map("commission_rate")
-  totalEarnings  Decimal  @default(0) @db.Decimal(12, 2) @map("total_earnings")
-  pendingPayout  Decimal  @default(0) @db.Decimal(12, 2) @map("pending_payout")
-  isApproved     Boolean  @default(false) @map("is_approved")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  referrals   PartnerReferral[]
-  commissions PartnerCommission[]
-
-  @@map("partner_profiles")
-}
-
-/// Реферальное событие.
-/// SOURCE OF TRUTH для "кто привёл пользователя" (event=REGISTRATION).
-/// User.referredById УДАЛЁН — информация здесь.
-/// Partial unique index на referred_user_id WHERE event='REGISTRATION' — raw SQL.
-model PartnerReferral {
-  id               String           @id @default(uuid())
-  partnerProfileId String           @map("partner_profile_id")
-  referredUserId   String           @map("referred_user_id")
-  event            PartnerEventType
-  createdAt        DateTime         @default(now()) @map("created_at")
-
-  partnerProfile PartnerProfile @relation(fields: [partnerProfileId], references: [id], onDelete: Cascade)
-  referredUser   User           @relation("ReferredUser", fields: [referredUserId], references: [id])
-
-  @@index([partnerProfileId])
-  @@index([referredUserId])
-  @@map("partner_referrals")
-}
-
-/// Комиссия партнёра. commission_rate/purchase_amount — snapshot.
-model PartnerCommission {
-  id               String           @id @default(uuid())
-  partnerProfileId String           @map("partner_profile_id")
-  purchaseId       String           @map("purchase_id")
-  referredUserId   String           @map("referred_user_id")
-  purchaseAmount   Decimal          @db.Decimal(10, 2) @map("purchase_amount")
-  commissionRate   Decimal          @db.Decimal(5, 2) @map("commission_rate")
-  commissionAmount Decimal          @db.Decimal(10, 2) @map("commission_amount")
-  status           CommissionStatus @default(PENDING)
-  paidAt           DateTime?        @map("paid_at")
-  createdAt        DateTime         @default(now()) @map("created_at")
-
-  partnerProfile PartnerProfile @relation(fields: [partnerProfileId], references: [id], onDelete: Cascade)
-  purchase       Purchase       @relation(fields: [purchaseId], references: [id])
-
-  @@index([partnerProfileId])
-  @@index([purchaseId])
-  @@index([status])
-  @@map("partner_commissions")
-}
-
-// ╔══════════════════════════════════════════════════════════════╗
-// ║                  16. AUDIT LOG  (1 таблица)                 ║
-// ╚══════════════════════════════════════════════════════════════╝
-
-/// Лог бизнес-действий администратора. Append-only.
-/// previous_data / new_data — snapshot ИЗМЕНЁННЫХ полей.
-model AuditLog {
-  id           String   @id @default(uuid())
-  actorId      String   @map("actor_id")
-  actorRole    UserRole @map("actor_role")
-  action       String
-  targetType   String   @map("target_type")
-  targetId     String?  @map("target_id")
-  details      Json?
-  previousData Json?    @map("previous_data")
-  newData      Json?    @map("new_data")
-  ipAddress    String?  @map("ip_address")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  @@index([actorId])
-  @@index([targetType, targetId])
-  @@index([action])
-  @@index([createdAt])
-  @@map("audit_logs")
 }

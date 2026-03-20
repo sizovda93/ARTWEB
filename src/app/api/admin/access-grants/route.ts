@@ -13,6 +13,8 @@ const grantSchema = z.object({
   resourceId: z.string().uuid().optional(),
   tier: z.enum(["BASIC", "STANDARD", "PARTNER"]).optional(),
   expiresAt: z.string().datetime().optional(),
+  dailyLimit: z.number().int().min(0).optional(),
+  monthlyLimit: z.number().int().min(0).optional(),
 });
 
 const revokeSchema = z.object({
@@ -32,9 +34,6 @@ export async function GET(request: NextRequest) {
     const grants = await prisma.accessGrant.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
-      include: {
-        tariff: { select: { id: true, name: true } },
-      },
     });
 
     // Enrich COURSE grants with course info
@@ -62,7 +61,6 @@ export async function GET(request: NextRequest) {
           : null,
       grantedVia: g.grantedVia,
       tier: g.tier,
-      tariffName: g.tariff?.name ?? null,
       isActive: g.isActive,
       expiresAt: g.expiresAt?.toISOString() ?? null,
       revokedAt: g.revokedAt?.toISOString() ?? null,
@@ -87,16 +85,35 @@ export async function POST(request: NextRequest) {
     const input = grantSchema.parse(body);
     const ip = getClientIp(request);
 
-    // Validate: COURSE requires resourceId
-    if (input.resourceType === "COURSE" && !input.resourceId) {
-      throw new AuthError("VALIDATION_ERROR", "Для COURSE необходим resourceId (courseId)");
-    }
-    // Global resources must NOT have resourceId
-    if (input.resourceType !== "COURSE" && input.resourceId) {
-      throw new AuthError(
-        "VALIDATION_ERROR",
-        "Для KNOWLEDGE_BASE / AI_CHAT resourceId не указывается",
-      );
+    // ── Strict contract validation per resourceType ──
+    if (input.resourceType === "COURSE") {
+      if (!input.resourceId) {
+        throw new AuthError("VALIDATION_ERROR", "Для COURSE необходим resourceId (courseId)");
+      }
+      if (input.tier) {
+        throw new AuthError("VALIDATION_ERROR", "tier не допустим для COURSE");
+      }
+      if (input.dailyLimit !== undefined || input.monthlyLimit !== undefined) {
+        throw new AuthError("VALIDATION_ERROR", "dailyLimit/monthlyLimit не допустимы для COURSE");
+      }
+    } else if (input.resourceType === "KNOWLEDGE_BASE") {
+      if (input.resourceId) {
+        throw new AuthError("VALIDATION_ERROR", "resourceId не допустим для KNOWLEDGE_BASE");
+      }
+      if (!input.tier) {
+        throw new AuthError("VALIDATION_ERROR", "Для KNOWLEDGE_BASE необходим tier");
+      }
+      if (input.dailyLimit !== undefined || input.monthlyLimit !== undefined) {
+        throw new AuthError("VALIDATION_ERROR", "dailyLimit/monthlyLimit не допустимы для KNOWLEDGE_BASE");
+      }
+    } else {
+      // AI_CHAT
+      if (input.resourceId) {
+        throw new AuthError("VALIDATION_ERROR", "resourceId не допустим для AI_CHAT");
+      }
+      if (input.tier) {
+        throw new AuthError("VALIDATION_ERROR", "tier не допустим для AI_CHAT");
+      }
     }
 
     // Verify user exists
@@ -146,6 +163,28 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // AI_CHAT: upsert usage limits with counter reset
+      if (input.resourceType === "AI_CHAT") {
+        await tx.aiUsageLimit.upsert({
+          where: { userId: input.userId },
+          create: {
+            userId: input.userId,
+            dailyLimit: input.dailyLimit ?? 10,
+            monthlyLimit: input.monthlyLimit ?? 100,
+            dailyRequests: 0,
+            monthlyRequests: 0,
+          },
+          update: {
+            dailyLimit: input.dailyLimit ?? 10,
+            monthlyLimit: input.monthlyLimit ?? 100,
+            dailyRequests: 0,
+            monthlyRequests: 0,
+            lastResetDaily: new Date(),
+            lastResetMonthly: new Date(),
+          },
+        });
+      }
+
       await writeAuditLog(
         {
           actorId: auth.userId,
@@ -160,6 +199,10 @@ export async function POST(request: NextRequest) {
             courseTitle,
             tier: input.tier ?? null,
             grantedVia: "ADMIN_GRANT",
+            ...(input.resourceType === "AI_CHAT" && {
+              dailyLimit: input.dailyLimit ?? 10,
+              monthlyLimit: input.monthlyLimit ?? 100,
+            }),
           },
           ipAddress: ip,
         },

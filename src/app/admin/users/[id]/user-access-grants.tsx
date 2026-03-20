@@ -12,7 +12,6 @@ interface GrantRow {
   resourceTitle: string | null;
   grantedVia: string;
   tier: string | null;
-  tariffName: string | null;
   isActive: boolean;
   expiresAt: string | null;
   revokedAt: string | null;
@@ -37,8 +36,7 @@ const RESOURCE_LABELS: Record<string, string> = {
 
 const SOURCE_LABELS: Record<string, string> = {
   ADMIN_GRANT: "Вручную",
-  PURCHASE: "Покупка",
-  PROMO_CODE: "Промокод",
+  SYSTEM: "Система",
 };
 
 export function UserAccessGrants({ userId, courses }: UserAccessGrantsProps) {
@@ -236,9 +234,6 @@ function GrantItem({
         <span className="text-xs text-gray-400">
           {SOURCE_LABELS[grant.grantedVia] ?? grant.grantedVia}
         </span>
-        {grant.tariffName && (
-          <span className="text-xs text-gray-400">· {grant.tariffName}</span>
-        )}
         {grant.expiresAt && (
           <span className="text-xs text-gray-400">
             до {new Date(grant.expiresAt).toLocaleDateString("ru-RU")}

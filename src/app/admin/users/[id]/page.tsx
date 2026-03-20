@@ -62,7 +62,6 @@ export default async function UserDetailPage({
       _count: {
         select: {
           sessions: true,
-          purchases: true,
           accessGrants: true,
         },
       },
@@ -193,7 +192,6 @@ export default async function UserDetailPage({
                 label="Активные сессии"
                 value={user._count.sessions}
               />
-              <SummaryRow label="Покупки" value={user._count.purchases} />
               <SummaryRow label="Доступы" value={user._count.accessGrants} />
             </dl>
           </SectionCard>

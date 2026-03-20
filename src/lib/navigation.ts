@@ -10,5 +10,4 @@ export const studentNavItems: NavItem[] = [
 export const adminNavItems: NavItem[] = [
   { label: "Дашборд", href: "/admin/dashboard" },
   { label: "Пользователи", href: "/admin/users" },
-  { label: "Тарифы", href: "/admin/tariffs" },
 ];

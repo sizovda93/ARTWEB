@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import type { AccessResourceType, TariffTier } from "@/generated/prisma/client";
+import type { AccessResourceType, AccessTier } from "@/generated/prisma/client";
 
 // ─── Tier ordering for KB access checks ──────────────────────────
 
@@ -73,7 +73,7 @@ export async function checkLessonAccess(
 
 /**
  * Check access to a knowledge base item.
- * Requires AccessGrant(KNOWLEDGE_BASE) with tier >= item.minTariffTier.
+ * Requires AccessGrant(KNOWLEDGE_BASE) with tier >= item.minAccessTier.
  */
 export async function checkKnowledgeBaseAccess(
   userId: string,
@@ -81,7 +81,7 @@ export async function checkKnowledgeBaseAccess(
 ): Promise<boolean> {
   const item = await prisma.knowledgeItem.findUnique({
     where: { id: knowledgeItemId },
-    select: { minTariffTier: true, isPublished: true },
+    select: { minAccessTier: true, isPublished: true },
   });
   if (!item || !item.isPublished) return false;
 
@@ -96,7 +96,7 @@ export async function checkKnowledgeBaseAccess(
   });
   if (!grant?.tier) return false;
 
-  return TIER_ORDER[grant.tier] >= TIER_ORDER[item.minTariffTier];
+  return TIER_ORDER[grant.tier] >= TIER_ORDER[item.minAccessTier];
 }
 
 /**
@@ -187,10 +187,10 @@ export async function getAiEmbeddingFilter(
     if (grant?.tier) {
       const accessibleTiers = Object.entries(TIER_ORDER)
         .filter(([, order]) => order <= TIER_ORDER[grant.tier!])
-        .map(([tier]) => tier) as TariffTier[];
+        .map(([tier]) => tier) as AccessTier[];
 
       const kbItems = await prisma.knowledgeItem.findMany({
-        where: { isPublished: true, minTariffTier: { in: accessibleTiers } },
+        where: { isPublished: true, minAccessTier: { in: accessibleTiers } },
         select: { id: true },
       });
 

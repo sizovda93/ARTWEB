@@ -43,7 +43,7 @@ export async function requireAuth(): Promise<AuthContext> {
 
 /**
  * Require authenticated user with verified email.
- * Use for sensitive actions: purchases, AI chat, assignment submissions.
+ * Use for sensitive actions: AI chat, assignment submissions.
  * Login itself does NOT require verification (user must be able to
  * log in, see the "verify your email" banner, and resend the link).
  */
@@ -68,11 +68,11 @@ export async function requireAdmin(): Promise<AuthContext> {
 
 // ─── DB-backed fresh state checks ────────────────────────────────
 // JWT claims are cached for 15 minutes. For sensitive mutations
-// (admin actions, purchases, access grants), verify current DB state.
+// (admin actions, access grants), verify current DB state.
 
 /**
  * Re-check user state from DB. Use for sensitive operations where
- * a 15-minute stale JWT is not acceptable (admin actions, purchases).
+ * a 15-minute stale JWT is not acceptable (admin actions, access grants).
  * Throws if user is inactive or not found.
  */
 export async function requireAuthFresh(): Promise<AuthContext> {
