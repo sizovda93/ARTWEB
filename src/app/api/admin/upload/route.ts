@@ -5,8 +5,11 @@ import crypto from "crypto";
 import { requireAdminFresh, AuthError } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-response";
 
-const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+const ALLOWED_TYPES = new Set([
+  "image/jpeg", "image/png", "image/webp", "image/gif",
+  "application/pdf",
+]);
+const MAX_SIZE = 20 * 1024 * 1024; // 20 MB
 
 /** POST /api/admin/upload — upload image file */
 export async function POST(request: NextRequest) {
@@ -21,7 +24,7 @@ export async function POST(request: NextRequest) {
       throw new AuthError("VALIDATION_ERROR", "Файл не выбран");
     }
     if (!ALLOWED_TYPES.has(file.type)) {
-      throw new AuthError("VALIDATION_ERROR", "Допустимые форматы: JPG, PNG, WebP, GIF");
+      throw new AuthError("VALIDATION_ERROR", "Допустимые форматы: JPG, PNG, WebP, GIF, PDF");
     }
     if (file.size > MAX_SIZE) {
       throw new AuthError("VALIDATION_ERROR", "Максимальный размер файла: 5 МБ");
