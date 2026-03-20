@@ -140,6 +140,7 @@ export default async function StudentLessonPage({
             status: sub.status,
             textAnswer: sub.textAnswer,
             finalScore: sub.finalScore,
+            finalComment: sub.finalComment,
             testAnswers: sub.testAnswers as Record<string, string[]> | null,
             createdAt: sub.createdAt.toISOString(),
           }

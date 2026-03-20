@@ -14,4 +14,5 @@ export const adminNavItems: NavItem[] = [
   { label: "Пользователи", href: "/admin/users" },
   { label: "Курсы", href: "/admin/courses" },
   { label: "База знаний", href: "/admin/knowledge-base" },
+  { label: "Проверка работ", href: "/admin/submissions" },
 ];

@@ -21,6 +21,7 @@ interface SubmissionData {
   status: string;
   textAnswer: string | null;
   finalScore: number | null;
+  finalComment: string | null;
   testAnswers: Record<string, string[]> | null;
   createdAt: string;
 }
@@ -125,10 +126,16 @@ function TextAssignment({ courseId, assignment }: { courseId: string; assignment
           {loading ? "Отправка..." : submitted ? "Отправить заново" : "Отправить"}
         </button>
       )}
-      {assignment.submission?.status === "APPROVED" && assignment.submission.finalScore !== null && (
+      {assignment.submission?.finalScore !== null && assignment.submission?.finalScore !== undefined && (
         <p className="text-sm text-green-600 mt-2">
           Оценка: {assignment.submission.finalScore} / {assignment.maxScore}
         </p>
+      )}
+      {assignment.submission?.finalComment && (
+        <div className="mt-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+          <p className="text-xs text-gray-500 mb-1">Комментарий преподавателя:</p>
+          <p className="text-sm text-gray-700 whitespace-pre-wrap">{assignment.submission.finalComment}</p>
+        </div>
       )}
     </div>
   );

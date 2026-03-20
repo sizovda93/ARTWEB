@@ -30,7 +30,8 @@ export type AuditAction =
   | "knowledge_item_updated"
   | "knowledge_item_published"
   | "knowledge_item_unpublished"
-  | "knowledge_item_deleted";
+  | "knowledge_item_deleted"
+  | "submission_reviewed";
 
 type JsonValue = Prisma.InputJsonValue;
 
