@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiClient } from "@/lib/api-client";
 
 const INPUT =
@@ -13,6 +13,7 @@ interface LessonDetail {
   type: "VIDEO" | "TEXT" | "MIXED";
   content: string | null;
   videoPath: string | null;
+  coverPath: string | null;
   videoDuration: number | null;
   isFree: boolean;
   requiresAssignment: boolean;
@@ -32,14 +33,17 @@ export function LessonEditor({
   const [lesson, setLesson] = useState<LessonDetail | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form fields
   const [title, setTitle] = useState("");
   const [type, setType] = useState<"VIDEO" | "TEXT" | "MIXED">("MIXED");
   const [content, setContent] = useState("");
   const [videoPath, setVideoPath] = useState("");
+  const [coverPath, setCoverPath] = useState<string | null>(null);
   const [isFree, setIsFree] = useState(false);
   const [requiresAssignment, setRequiresAssignment] = useState(false);
 
@@ -55,6 +59,7 @@ export function LessonEditor({
       setType(l.type);
       setContent(l.content ?? "");
       setVideoPath(l.videoPath ?? "");
+      setCoverPath(l.coverPath);
       setIsFree(l.isFree);
       setRequiresAssignment(l.requiresAssignment);
     }
@@ -64,6 +69,46 @@ export function LessonEditor({
   useEffect(() => {
     fetchLesson();
   }, [fetchLesson]);
+
+  async function handleCoverUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("folder", "lessons");
+
+    const res = await fetch("/api/admin/upload", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json();
+    setUploading(false);
+
+    if (!res.ok) {
+      setError(data.error?.message ?? "Ошибка загрузки");
+      return;
+    }
+
+    setCoverPath(data.filePath);
+    await apiClient(`/api/admin/courses/${courseId}/lessons/${lessonId}`, {
+      method: "PUT",
+      body: JSON.stringify({ coverPath: data.filePath }),
+    });
+    onSave();
+  }
+
+  async function handleRemoveCover() {
+    setCoverPath(null);
+    await apiClient(`/api/admin/courses/${courseId}/lessons/${lessonId}`, {
+      method: "PUT",
+      body: JSON.stringify({ coverPath: null }),
+    });
+    onSave();
+  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -142,6 +187,52 @@ export function LessonEditor({
           Сохранено
         </div>
       )}
+
+      {/* Cover image */}
+      <div className="mb-5">
+        <label className="block text-sm font-medium text-gray-700 mb-2">Обложка урока</label>
+        {coverPath ? (
+          <div className="relative inline-block">
+            <img
+              src={coverPath}
+              alt="Обложка урока"
+              className="h-32 w-auto rounded-lg border border-gray-200 object-cover"
+            />
+            <button
+              type="button"
+              onClick={handleRemoveCover}
+              className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white text-xs hover:bg-red-600"
+              title="Удалить обложку"
+            >
+              x
+            </button>
+          </div>
+        ) : (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="flex h-32 w-52 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-sm text-gray-400 hover:border-indigo-400 hover:text-indigo-500"
+          >
+            {uploading ? "Загрузка..." : "Загрузить обложку"}
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={handleCoverUpload}
+          className="hidden"
+        />
+        {coverPath && (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="mt-2 block text-sm text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+          >
+            {uploading ? "Загрузка..." : "Заменить"}
+          </button>
+        )}
+      </div>
 
       <form onSubmit={handleSave} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

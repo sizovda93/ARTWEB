@@ -55,6 +55,7 @@ export const updateLessonSchema = z.object({
   videoDuration: z.number().int().min(0).nullable().optional(),
   isFree: z.boolean().optional(),
   requiresAssignment: z.boolean().optional(),
+  coverPath: z.string().max(500).nullable().optional(),
 });
 
 export const lessonReorderSchema = z.object({
