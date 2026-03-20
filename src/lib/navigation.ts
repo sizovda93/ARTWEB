@@ -5,6 +5,7 @@ export interface NavItem {
 
 export const studentNavItems: NavItem[] = [
   { label: "Дашборд", href: "/dashboard" },
+  { label: "Мои курсы", href: "/courses" },
 ];
 
 export const adminNavItems: NavItem[] = [
