@@ -77,6 +77,8 @@ export async function DELETE(request: NextRequest, { params }: RouteCtx) {
 
     const existing = await verifyModuleOwnership(courseId, moduleId);
 
+    const lessonsCount = await prisma.lesson.count({ where: { moduleId } });
+
     await prisma.$transaction(async (tx) => {
       await tx.module.delete({ where: { id: moduleId } });
 
@@ -88,6 +90,7 @@ export async function DELETE(request: NextRequest, { params }: RouteCtx) {
           targetType: "Module",
           targetId: moduleId,
           previousData: { courseId, title: existing.title },
+          details: { cascadeDeletedLessons: lessonsCount },
           ipAddress: ip,
         },
         tx,

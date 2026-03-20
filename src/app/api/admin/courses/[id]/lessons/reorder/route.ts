@@ -32,6 +32,10 @@ export async function PUT(request: NextRequest, { params }: RouteCtx) {
       select: { id: true },
     });
     const existingIds = new Set(lessons.map((l) => l.id));
+
+    if (orderedIds.length !== existingIds.size) {
+      throw new AuthError("VALIDATION_ERROR", "orderedIds должен содержать все уроки модуля");
+    }
     for (const lid of orderedIds) {
       if (!existingIds.has(lid)) {
         throw new AuthError("VALIDATION_ERROR", "Урок не принадлежит этому модулю");

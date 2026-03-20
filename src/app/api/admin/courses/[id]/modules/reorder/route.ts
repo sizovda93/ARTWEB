@@ -24,6 +24,10 @@ export async function PUT(request: NextRequest, { params }: RouteCtx) {
       select: { id: true },
     });
     const existingIds = new Set(modules.map((m) => m.id));
+
+    if (orderedIds.length !== existingIds.size) {
+      throw new AuthError("VALIDATION_ERROR", "orderedIds должен содержать все модули курса");
+    }
     for (const mid of orderedIds) {
       if (!existingIds.has(mid)) {
         throw new AuthError("VALIDATION_ERROR", "Модуль не принадлежит этому курсу");

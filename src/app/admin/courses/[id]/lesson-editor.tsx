@@ -45,7 +45,8 @@ export function LessonEditor({
   const [videoPath, setVideoPath] = useState("");
   const [coverPath, setCoverPath] = useState<string | null>(null);
   const [isFree, setIsFree] = useState(false);
-  const [requiresAssignment, setRequiresAssignment] = useState(false);
+  // requiresAssignment: preparatory field, hidden until assignment flow is built
+  const [requiresAssignment] = useState(false);
 
   const fetchLesson = useCallback(async () => {
     setLoadingData(true);
@@ -61,7 +62,6 @@ export function LessonEditor({
       setVideoPath(l.videoPath ?? "");
       setCoverPath(l.coverPath);
       setIsFree(l.isFree);
-      setRequiresAssignment(l.requiresAssignment);
     }
     setLoadingData(false);
   }, [courseId, lessonId]);
@@ -295,15 +295,6 @@ export function LessonEditor({
               className="rounded border-gray-300"
             />
             Бесплатный урок
-          </label>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={requiresAssignment}
-              onChange={(e) => setRequiresAssignment(e.target.checked)}
-              className="rounded border-gray-300"
-            />
-            Требует задание
           </label>
         </div>
 
