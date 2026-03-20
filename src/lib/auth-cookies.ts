@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const USE_SECURE_COOKIES = (process.env.NEXT_PUBLIC_APP_URL ?? "").startsWith("https");
 
 const ACCESS_TOKEN_MAX_AGE = 15 * 60; // 15 minutes
 const REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60; // 7 days
@@ -8,7 +8,7 @@ const CSRF_TOKEN_MAX_AGE = 7 * 24 * 60 * 60; // matches refresh
 
 const COOKIE_BASE = {
   httpOnly: true,
-  secure: IS_PRODUCTION,
+  secure: USE_SECURE_COOKIES,
   sameSite: "lax" as const,
 };
 
@@ -40,7 +40,7 @@ export function setAuthCookies(
   // refresh_token has path=/api/auth so middleware can't read it on page requests.
   response.cookies.set("has_session", "1", {
     httpOnly: false,
-    secure: IS_PRODUCTION,
+    secure: USE_SECURE_COOKIES,
     sameSite: "lax",
     path: "/",
     maxAge: REFRESH_TOKEN_MAX_AGE,
@@ -56,7 +56,7 @@ export function setCsrfCookie(
 ): void {
   response.cookies.set("csrf_token", token, {
     httpOnly: false,
-    secure: IS_PRODUCTION,
+    secure: USE_SECURE_COOKIES,
     sameSite: "lax",
     path: "/",
     maxAge: CSRF_TOKEN_MAX_AGE,
@@ -81,7 +81,7 @@ export function clearAuthCookies(response: NextResponse): void {
 
   response.cookies.set("csrf_token", "", {
     httpOnly: false,
-    secure: IS_PRODUCTION,
+    secure: USE_SECURE_COOKIES,
     sameSite: "lax",
     path: "/",
     maxAge: 0,
@@ -89,7 +89,7 @@ export function clearAuthCookies(response: NextResponse): void {
 
   response.cookies.set("has_session", "", {
     httpOnly: false,
-    secure: IS_PRODUCTION,
+    secure: USE_SECURE_COOKIES,
     sameSite: "lax",
     path: "/",
     maxAge: 0,
