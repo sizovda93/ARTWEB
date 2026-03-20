@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiClient } from "@/lib/api-client";
+import { ChecklistEditor } from "./checklist-editor";
+import { AssignmentEditor } from "./assignment-editor";
 
 const INPUT =
   "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500";
@@ -316,6 +318,16 @@ export function LessonEditor({
           </button>
         </div>
       </form>
+
+      {/* Checklists section */}
+      <div className="mt-6 pt-6 border-t border-gray-200">
+        <ChecklistEditor courseId={courseId} lessonId={lessonId} />
+      </div>
+
+      {/* Assignments section */}
+      <div className="mt-6 pt-6 border-t border-gray-200">
+        <AssignmentEditor courseId={courseId} lessonId={lessonId} />
+      </div>
     </div>
   );
 }

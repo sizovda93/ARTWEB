@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { checkLessonAccess } from "@/lib/access";
 import { Badge } from "@/components/ui/badge";
 import { LessonActions } from "./lesson-actions";
+import { LessonChecklist } from "./lesson-checklist";
+import { LessonAssignments } from "./lesson-assignments";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -92,6 +94,59 @@ export default async function StudentLessonPage({
   const prevLesson = currentIdx > 0 ? allLessons[currentIdx - 1] : null;
   const nextLesson = currentIdx < allLessons.length - 1 ? allLessons[currentIdx + 1] : null;
 
+  // Checklists
+  const checklists = await prisma.checklist.findMany({
+    where: { lessonId },
+    orderBy: { sortOrder: "asc" },
+    include: { items: { orderBy: { sortOrder: "asc" } } },
+  });
+
+  // Assignments with user's latest submission
+  const assignmentsRaw = await prisma.assignment.findMany({
+    where: { lessonId },
+    orderBy: { sortOrder: "asc" },
+    include: {
+      questions: {
+        orderBy: { sortOrder: "asc" },
+        include: { options: { orderBy: { sortOrder: "asc" }, select: { id: true, text: true } } },
+      },
+    },
+  });
+
+  const assignmentIds = assignmentsRaw.map((a) => a.id);
+  const submissions = assignmentIds.length > 0
+    ? await prisma.assignmentSubmission.findMany({
+        where: { userId: auth.userId, assignmentId: { in: assignmentIds } },
+        orderBy: { createdAt: "desc" },
+      })
+    : [];
+  const submissionMap = new Map<string, typeof submissions[0]>();
+  for (const s of submissions) {
+    if (!submissionMap.has(s.assignmentId)) submissionMap.set(s.assignmentId, s);
+  }
+
+  const assignmentsForStudent = assignmentsRaw.map((a) => {
+    const sub = submissionMap.get(a.id);
+    return {
+      id: a.id,
+      title: a.title,
+      description: a.description,
+      type: a.type,
+      maxScore: a.maxScore,
+      questions: a.questions,
+      submission: sub
+        ? {
+            id: sub.id,
+            status: sub.status,
+            textAnswer: sub.textAnswer,
+            finalScore: sub.finalScore,
+            testAnswers: sub.testAnswers as Record<string, string[]> | null,
+            createdAt: sub.createdAt.toISOString(),
+          }
+        : null,
+    };
+  });
+
   return (
     <div className="max-w-4xl mx-auto">
       {/* Breadcrumb */}
@@ -150,6 +205,22 @@ export default async function StudentLessonPage({
           <div className="prose prose-gray max-w-none whitespace-pre-wrap text-sm leading-relaxed">
             {lesson.content}
           </div>
+        </div>
+      )}
+
+      {/* Checklists */}
+      {checklists.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Чеклист</h2>
+          <LessonChecklist checklists={checklists} />
+        </div>
+      )}
+
+      {/* Assignments */}
+      {assignmentsForStudent.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Задания</h2>
+          <LessonAssignments courseId={course.id} assignments={assignmentsForStudent} />
         </div>
       )}
 

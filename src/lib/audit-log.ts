@@ -19,7 +19,13 @@ export type AuditAction =
   | "module_deleted"
   | "lesson_created"
   | "lesson_updated"
-  | "lesson_deleted";
+  | "lesson_deleted"
+  | "checklist_created"
+  | "checklist_updated"
+  | "checklist_deleted"
+  | "assignment_created"
+  | "assignment_updated"
+  | "assignment_deleted";
 
 type JsonValue = Prisma.InputJsonValue;
 
