@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Badge } from "@/components/ui/badge";
 import { UserActions } from "./user-actions";
+import { UserAccessGrants } from "./user-access-grants";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -69,6 +70,12 @@ export default async function UserDetailPage({
   });
 
   if (!user) notFound();
+
+  // Courses for access grant dropdown
+  const allCourses = await prisma.course.findMany({
+    select: { id: true, title: true },
+    orderBy: { title: "asc" },
+  });
 
   const isSelf = user.id === auth.userId;
 
@@ -172,6 +179,10 @@ export default async function UserDetailPage({
               </dl>
             </SectionCard>
           )}
+
+          <SectionCard title="Доступы">
+            <UserAccessGrants userId={user.id} courses={allCourses} />
+          </SectionCard>
         </div>
 
         {/* Right column: stats + actions */}

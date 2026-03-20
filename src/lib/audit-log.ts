@@ -7,7 +7,15 @@ export type AuditAction =
   | "user_role_changed"
   | "partner_approved"
   | "partner_revoked"
-  | "user_sessions_terminated";
+  | "user_sessions_terminated"
+  | "tariff_created"
+  | "tariff_updated"
+  | "tariff_activated"
+  | "tariff_deactivated"
+  | "tariff_course_linked"
+  | "tariff_course_unlinked"
+  | "access_granted"
+  | "access_revoked";
 
 type JsonValue = Prisma.InputJsonValue;
 

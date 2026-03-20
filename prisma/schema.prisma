@@ -282,6 +282,7 @@ model Tariff {
   tier        TariffTier
   description String?
   price       Decimal    @db.Decimal(10, 2)
+  oldPrice    Decimal?   @db.Decimal(10, 2) @map("old_price")
   currency    String     @default("RUB")
   isActive    Boolean    @default(true) @map("is_active")
   sortOrder   Int        @default(0) @map("sort_order")
