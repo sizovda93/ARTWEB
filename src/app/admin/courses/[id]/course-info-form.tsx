@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { apiClient } from "@/lib/api-client";
 import type { CourseData } from "./course-builder";
 import { generateSlug } from "./slug-utils";
@@ -18,9 +18,55 @@ export function CourseInfoForm({
   const [title, setTitle] = useState(course.title);
   const [slug, setSlug] = useState(course.slug);
   const [description, setDescription] = useState(course.description ?? "");
+  const [coverPath, setCoverPath] = useState(course.coverPath);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleCoverUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("folder", "covers");
+
+    const res = await fetch("/api/admin/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json();
+    setUploading(false);
+
+    if (!res.ok) {
+      setError(data.error?.message ?? "Ошибка загрузки");
+      return;
+    }
+
+    setCoverPath(data.filePath);
+
+    // Save cover path immediately
+    await apiClient(`/api/admin/courses/${course.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ coverPath: data.filePath }),
+    });
+    onSave();
+  }
+
+  async function handleRemoveCover() {
+    setCoverPath(null);
+    await apiClient(`/api/admin/courses/${course.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ coverPath: null }),
+    });
+    onSave();
+  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -92,6 +138,52 @@ export function CourseInfoForm({
           Сохранено
         </div>
       )}
+
+      {/* Cover image */}
+      <div className="mb-5">
+        <label className="block text-sm font-medium text-gray-700 mb-2">Обложка</label>
+        {coverPath ? (
+          <div className="relative inline-block">
+            <img
+              src={coverPath}
+              alt="Обложка курса"
+              className="h-40 w-auto rounded-lg border border-gray-200 object-cover"
+            />
+            <button
+              type="button"
+              onClick={handleRemoveCover}
+              className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white text-xs hover:bg-red-600"
+              title="Удалить обложку"
+            >
+              x
+            </button>
+          </div>
+        ) : (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="flex h-40 w-64 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-gray-300 text-sm text-gray-400 hover:border-indigo-400 hover:text-indigo-500"
+          >
+            {uploading ? "Загрузка..." : "Нажмите для загрузки"}
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={handleCoverUpload}
+          className="hidden"
+        />
+        {coverPath && (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="mt-2 text-sm text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+          >
+            {uploading ? "Загрузка..." : "Заменить обложку"}
+          </button>
+        )}
+      </div>
 
       <form onSubmit={handleSave} className="space-y-4">
         <div>
